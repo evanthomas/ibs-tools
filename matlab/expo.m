@@ -7,11 +7,10 @@ function expo(filename)
     if ~exist('filename', 'var')
         %         [filename, path] = uigetfile('*.dat', 'Select a PD/pressure file')
         filename = 'acast1_jej.dat';
-        %         path = '/Users/thomas.e/neurosim/ibs-tools/test-data/';
-        path = 'C:\Users\evan\Documents\neurosim\ibs-tools\test-data\';
+        path = '/Users/thomas.e/neurosim/ibs-tools/test-data/';
+%         path = 'C:\Users\evan\Documents\neurosim\ibs-tools\test-data\';
     end
     
-    hoverTargets = containers.Map('KeyType', 'matlab.graphics.primitive.Line', 'ValueType', 'char');
     [pdAxes, pressAxes] = setup;
     
     junk = load(strcat(path, filename));
@@ -21,7 +20,9 @@ function expo(filename)
     
     press = junk(:,2);
     startAnalysis(press, pressAxes, 'pressure');
-    
+
+    % Set up mouse movement tracker for the mouse hover
+    setDefaultHandlers()
     
     function startAnalysis(signal, theseAxes, sigName)
         signal = signal - min(signal);
@@ -110,6 +111,10 @@ function expo(filename)
         
         % Linear fit
         signalLine = a(1) + a(2)*tl;
+        drawRiseLine(signalLine)
+    end
+    
+    function drawRiseLine(signalLine)
         RoR = a(2)/5;
         
         line(theseAxes, ...
@@ -118,23 +123,25 @@ function expo(filename)
         
         x = tl(1)*5;
         y = signalLine(1);
-        h = line(theseAxes, ...
-            x, y, ...
-            'Color', 'red', ...
-            'MarkerFaceColor', 'red', ...
-            'Marker', 'square', ...
-            'MarkerSize', 8, ...
-            'ButtonDownFcn', {@riseLineEventHandler, 'mouseDown', 'lo'});
-        
-        x = tl(end)*5;
-        y = signalLine(end);
+        ud1.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'end'};
         line(theseAxes, ...
             x, y, ...
             'Color', 'red', ...
             'MarkerFaceColor', 'red', ...
             'Marker', 'square', ...
             'MarkerSize', 8, ...
-            'ButtonDownFcn', {@riseLineEventHandler, 'mouseDown', 'hi'});
+            'UserData', ud1);
+        
+        x = tl(end)*5;
+        y = signalLine(end);
+        ud2.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'start'};
+        line(theseAxes, ...
+            x, y, ...
+            'Color', 'red', ...
+            'MarkerFaceColor', 'red', ...
+            'Marker', 'square', ...
+            'MarkerSize', 8, ...
+            'UserData', ud2);
         
         
         % Display rate of rise
@@ -145,23 +152,89 @@ function expo(filename)
             sprintf('Rate of rise = %g', RoR), ...
             'fontsize',12,'FontWeight','bold');
         
+    end
+    
+    function riseLineClickHandler(o, evt, signal, detail)
+        set(gcf, 'WindowButtonMotionFcn', {@riseLineDragHandler, signal, detail});        
+    end
+    
+    function riseLineDragHandler(o, evt, signal, detail)
+        get(gca, 'CurrentPoint')
+    end
+    
+    function setDefaultHandlers
+        set(gcf, ...
+            'WindowButtonMotionFcn', @mousemover, ...
+            'CloseRequestFcn', {@expoQuit, gcf}, ...
+            'WindowButtonDownFcn', '' ...
+            );
+    end
+    
+    function accepted = riseLineHoverHandler(args)            
+        delta = 1.5;        
+        pnt = args{1};
+        signal= args{2};
+        detail = args{3};
+        ptr = args{4};
+        
+        x = ptr(1);
+        y = ptr(2);
+        xlo = pnt(1) - delta;
+        xhi = pnt(1) + delta;
+        ylo = pnt(2) - delta;
+        yhi = pnt(2) + delta;
+        
+        if xlo<=x & x<=xhi & ylo<=y & y<=yhi
+            set(gcf, 'Pointer', 'hand')
+            set(gcf, 'WindowButtonDownFcn', {@riseLineClickHandler, signal, detail});
+            accepted = true;
+        else
+            setDefaultHandlers();
+            accepted = false;
+        end            
         
     end
     
-    function setDragCursor(o, crap)
-        setptr(gcf, 'help')
-    end
-    
-    function riseLineEventHandler(o, crap, varargin)
-        varargin
-    end
-    
-    function mousemover(o, crap, hoverTargets)
+    function mousemover(o, evt, hoverTargets)
         
-        hs = keys(hoverTargets);
-        for i = 1:length(hs)
-            hs
+        % Determine which (if any) axes the mouse is over
+        axs = findobj(o, 'type', 'axes')';
+        inaxes = 0;
+        for ax=axs
+            %subplot(ax)
+            p = get(ax, 'CurrentPoint');
+            p = p(1, 1:2);
+            xlim = get(ax, 'xlim');
+            ylim = get(ax, 'ylim');
+            if pinrect(p, [xlim ylim])  % inside an axes
+                inaxes = 1;
+                break
+            end
         end
+
+        % Not in any axes
+        if ~inaxes
+            setptr(gcf, 'arrow');
+            return
+        end
+
+        gs = findall(ax);
+        for i=1:length(gs)
+            g = gs(i);
+            ud = get(g, 'UserData');
+            if ~isempty(ud)
+                if isfield(ud, 'hoverFunction')
+                    f = ud.hoverFunction{1};
+                    args = {ud.hoverFunction{2:end}};
+                    args{end+1} = p;
+                    if f(args)
+                        return
+                    end
+                end
+            end
+        end
+        
+        setptr(gcf, 'arrow');
         
     end
     
@@ -172,6 +245,23 @@ function expo(filename)
     function saveToExcel(o, crap, h)
     end
     
+    function bool = pinrect(pts,rect)
+        %PINRECT Determine if points lie in or on rectangle.
+        %   Inputs:
+        %     pts - n-by-2 array of [x,y] data
+        %     rect - 1-by-4 vector of [xlim ylim] for the rectangle
+        %   Outputs:
+        %     bool - length n binary vector
+        
+        %   Copyright 1988-2002 The MathWorks, Inc.
+        % $Revision: 1.8 $
+        
+        [i,j] = find(isnan(pts));
+        bool = (pts(:,1)<rect(1))|(pts(:,1)>rect(2))|...
+            (pts(:,2)<rect(3))|(pts(:,2)>rect(4));
+        bool = ~bool;
+        bool(i) = 0;
+    end
     
     function [pdAxes, pressAxes] = setup(hoverTargets)
         UI_NAME = 'Pulse Analyzer';
@@ -191,10 +281,6 @@ function expo(filename)
             'Position', [36.6667   15.5000  140   50], ...
             'UserData', ud, ...
             'toolbar',  'figure');
-        set(h1, ...
-            'WindowButtonMotionFcn', @mousemover, ...
-            'CloseRequestFcn', {@expoQuit, h1} ...
-            );
         
         pdAxes = axes( ...
             'Position', [0.03 0.084016393442623 0.96 0.379098360655738], ...
