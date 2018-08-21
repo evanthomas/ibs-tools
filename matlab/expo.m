@@ -89,6 +89,21 @@ function expo(filename)
         text(theseAxes, xt, yt, ...
             sprintf('t_1_/_2 = %g', thalf), ...
             'fontsize',12,'FontWeight','bold');
+        
+        % Add the begin and end drag lines
+        ylim = get(theseAxes, 'YLim');
+        tstart = (t(1)+indx)*5;
+        tend   = (t(end)+indx)*5;
+        line(theseAxes, ...
+            [tstart tstart], ylim, ...
+            'color', 'black', ...
+            'LineWidth', 2 ...
+            );
+        line(theseAxes, ...
+            [tend tend], ylim, ...
+            'color', 'black', ...
+            'LineWidth', 2 ...
+            );
     end
     
     function setRiseLine(theseAxes, signal, sigName)
@@ -101,27 +116,28 @@ function expo(filename)
         a = X\signall;
         
         % Time for signal to return with 10% of basline
-        x = signal(indx:end);
-        signalRet = min(find(x<0.1*maxSignal));
-        if isempty(signalRet)
-            signalRet = (length(signal)-indx)*5;
-        else
-            signalRet = signalRet*5;
-        end
+%         x = signal(indx:end);
+%         signalRet = min(find(x<0.1*maxSignal));
+%         if isempty(signalRet)
+%             signalRet = (length(signal)-indx)*5;
+%         else
+%             signalRet = signalRet*5;
+%         end
         
         % Linear fit
-        signalLine = a(1) + a(2)*tl;
-        drawRiseLine(signalLine)
+        tm = [24 indx]*5;
+        signalLine = a(1) + a(2)*[24 indx];
+        drawRiseLine(theseAxes, signalLine, tm, sigName)
     end
     
-    function drawRiseLine(signalLine)
-        RoR = a(2)/5;
+    function drawRiseLine(theseAxes, signalLine, tm, sigName)
+        RoR = (signalLine(2)-signalLine(1))/(tm(2)-tm(1));
         
         line(theseAxes, ...
-            tl*5, signalLine, ...
+            tm, signalLine, ...
             'Color', 'red');
         
-        x = tl(1)*5;
+        x = tm(1);
         y = signalLine(1);
         ud1.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'end'};
         line(theseAxes, ...
@@ -132,7 +148,7 @@ function expo(filename)
             'MarkerSize', 8, ...
             'UserData', ud1);
         
-        x = tl(end)*5;
+        x = tm(end);
         y = signalLine(end);
         ud2.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'start'};
         line(theseAxes, ...
@@ -145,9 +161,10 @@ function expo(filename)
         
         
         % Display rate of rise
+        ylim = get(theseAxes, 'YLim');
         xt = 20;
-        dy = maxSignal/12;
-        yt = maxSignal*0.7 + dy;
+        dy = ylim(2)/12;
+        yt = ylim(2)*0.7 + dy;
         text(theseAxes, xt, yt, ...
             sprintf('Rate of rise = %g', RoR), ...
             'fontsize',12,'FontWeight','bold');
