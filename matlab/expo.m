@@ -30,19 +30,23 @@ function expo(filename)
         [maxSignal, indx] = max(signal);
         
         % Time to signal peak
-        t2pSignal = (indx-24)*5;
-        
-        setRiseLine(theseAxes, signal, sigName)
-        setExpLine(theseAxes, signal, sigName)
-        
+        t2pSignal = (indx-24)*5;        
         
         % Plot original data
         line(theseAxes, tm*5, signal, 'Color', 'blue');
         meanSignal = mean(signal(24:end-24));
         
+        % Add the analysis lines.
+        % Note: This needs to be done after the data are drawn
+        %       and before text us added, so that the axes are 
+        %       fully initialised.
+        setRiseLine(theseAxes, signal, sigName)
+        setExpLine(theseAxes, signal, sigName)
+        
+        ylim = get(theseAxes, 'YLim');
         xt = 20;
-        dy = maxSignal/12;
-        yt = maxSignal*0.7 + dy;
+        dy = ylim(2)/12;
+        yt = ylim(2)*0.6 + 1*dy;
         
         % Display time to peak
         yt = yt + dy;
@@ -61,7 +65,6 @@ function expo(filename)
         text(theseAxes, xt, yt, ...
             sprintf('mean %s = %g', sigName, meanSignal), ...
             'fontsize',12,'FontWeight','bold');
-        
     end
     
     function setExpLine(theseAxes, signal, sigName)
@@ -82,16 +85,15 @@ function expo(filename)
         
         line(theseAxes, (t+indx)*5, expFit, 'Color', 'red');
         
+        ylim = get(theseAxes, 'YLim');
         xt = 20;
-        dy = maxSignal/12;
-        yt = maxSignal*0.7;% + 2*dy;
+        yt = ylim(2)*0.6;
         
         text(theseAxes, xt, yt, ...
             sprintf('t_1_/_2 = %g', thalf), ...
             'fontsize',12,'FontWeight','bold');
         
         % Add the begin and end drag lines
-        ylim = get(theseAxes, 'YLim');
         tstart = (t(1)+indx)*5;
         tend   = (t(end)+indx)*5;
         line(theseAxes, ...
@@ -135,36 +137,39 @@ function expo(filename)
         
         line(theseAxes, ...
             tm, signalLine, ...
-            'Color', 'red');
+            'Color', 'red', ...
+            'tag', 'rise line data');
         
         x = tm(1);
         y = signalLine(1);
-        ud1.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'end'};
+        ud1.hoverFunction = {@riseLineHoverHandler, signalLine, 'start'};
         line(theseAxes, ...
             x, y, ...
             'Color', 'red', ...
             'MarkerFaceColor', 'red', ...
             'Marker', 'square', ...
             'MarkerSize', 8, ...
-            'UserData', ud1);
+            'UserData', ud1, ...
+            'tag', 'rise line start');
         
         x = tm(end);
         y = signalLine(end);
-        ud2.hoverFunction = {@riseLineHoverHandler, [x, y], signalLine, 'start'};
+        ud2.hoverFunction = {@riseLineHoverHandler, signalLine, 'end'};
         line(theseAxes, ...
             x, y, ...
             'Color', 'red', ...
             'MarkerFaceColor', 'red', ...
             'Marker', 'square', ...
             'MarkerSize', 8, ...
-            'UserData', ud2);
+            'UserData', ud2, ...
+            'tag', 'rise line end');
         
         
         % Display rate of rise
         ylim = get(theseAxes, 'YLim');
         xt = 20;
         dy = ylim(2)/12;
-        yt = ylim(2)*0.7 + dy;
+        yt = ylim(2)*0.6 + dy;
         text(theseAxes, xt, yt, ...
             sprintf('Rate of rise = %g', RoR), ...
             'fontsize',12,'FontWeight','bold');
@@ -172,27 +177,61 @@ function expo(filename)
     end
     
     function riseLineClickHandler(o, evt, signal, detail)
-        set(gcf, 'WindowButtonMotionFcn', {@riseLineDragHandler, signal, detail});        
-    end
-    
-    function riseLineDragHandler(o, evt, signal, detail)
-        get(gca, 'CurrentPoint')
-    end
-    
-    function setDefaultHandlers
         set(gcf, ...
-            'WindowButtonMotionFcn', @mousemover, ...
-            'CloseRequestFcn', {@expoQuit, gcf}, ...
-            'WindowButtonDownFcn', '' ...
+            'WindowButtonMotionFcn', {@riseLineDragHandler, signal, detail}, ...
+            'WindowButtonUpFcn', @setDefaultHandlers ...
             );
     end
     
+    function riseLineDragHandler(o, evt, signal, detail)
+        cp = get(gca, 'CurrentPoint');
+        x = cp(1, 1);
+        y = cp(1, 2);
+        
+        switch detail
+            case 'end'
+                line = findobj(gca, 'tag', 'rise line start');
+                xdata = get(line, 'XData');
+                ydata = get(line, 'YData');
+                xstart = x;
+                ystart = y;
+                xend = xdata(end);
+                yend = ydata(end);
+            case 'start'
+                line = findobj(gca, 'tag', 'rise line end');
+                xdata = get(line, 'XData');
+                ydata = get(line, 'YData');
+                xstart = xdata(1);
+                ystart = ydata(1);
+                xend = x;
+                yend = y;
+        end
+                
+       lines = findobj(gca, 'tag', 'rise line data', '-or', 'tag', 'rise line start', '-or', 'tag', 'rise line end');
+       for i = 1:length(lines)
+           set(lines(i), ...
+               'Xdata', [xstart, xend], ...
+               'Ydata', [ystart, yend]);
+       end
+        
+    end
+    
+    function setDefaultHandlers(varargin)
+        set(gcf, ...
+            'WindowButtonMotionFcn', @mousemover, ...
+            'CloseRequestFcn', {@expoQuit, gcf}, ...
+            'WindowButtonDownFcn', '', ...
+            'WindowButtonUpFcn', '' ...
+            );
+        setptr(gcf, 'arrow');
+    end
+    
     function accepted = riseLineHoverHandler(args)            
-        delta = 1.5;        
-        pnt = args{1};
-        signal= args{2};
-        detail = args{3};
-        ptr = args{4};
+        delta = 1.5;
+        pnt = get the point here!!
+%         signal= args{2};
+        detail = args{2};
+        ptr = args{3};
         
         x = ptr(1);
         y = ptr(2);
@@ -201,9 +240,9 @@ function expo(filename)
         ylo = pnt(2) - delta;
         yhi = pnt(2) + delta;
         
-        if xlo<=x & x<=xhi & ylo<=y & y<=yhi
+        if xlo<=x && x<=xhi && ylo<=y && y<=yhi
             set(gcf, 'Pointer', 'hand')
-            set(gcf, 'WindowButtonDownFcn', {@riseLineClickHandler, signal, detail});
+            set(gcf, 'WindowButtonDownFcn', {@riseLineClickHandler, detail});
             accepted = true;
         else
             setDefaultHandlers();
@@ -348,6 +387,7 @@ function expo(filename)
             'callback', {@saveToExcel, h1});
         
     end
+    
     function err = expfit(lambda, t, y)
         
         A = zeros(length(t),length(lambda));
