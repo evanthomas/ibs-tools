@@ -40,8 +40,8 @@ function expo(filename)
         % Note: This needs to be done after the data are drawn
         %       and before text us added, so that the axes are 
         %       fully initialised.
-        setRiseLine(theseAxes, signal, sigName)
-        setExpLine(theseAxes, signal, sigName)
+        setRiseLine(theseAxes, signal)
+        setExpLine(theseAxes, signal)
         
         ylim = get(theseAxes, 'YLim');
         xt = 20;
@@ -67,11 +67,11 @@ function expo(filename)
             'fontsize',12,'FontWeight','bold');
     end
     
-    function setExpLine(theseAxes, signal, sigName)
-        [maxSignal, indx] = max(signal);
+    function [t, expFit, thalf] = makeExpFit(istart, iend, signal)
+        maxSignal = max(signal);
         % Initial estimate for lambda
-        y = signal(indx:end)/maxSignal + 1e-3;
-        t = 1:length(y);
+        y = signal(istart:iend)/maxSignal + 1e-3;
+        t = 1:length(y)-1;
         logstart = exp(polyfit(t',log(y),1));
         lam = logstart(2);
         % Refine fit
@@ -80,10 +80,18 @@ function expo(filename)
         thalf = log(2)/lambda*5;
         
         % exponential fit
-        t = [0 t];
+%         t = [0 t]; % Set time to start at t=0
         expFit = exp(-lambda*t)*maxSignal;
+    end
+    
+    function setExpLine(theseAxes, signal)
+        [~, indx] = max(signal);
+        [t, expFit, thalf] = makeExpFit(indx, length(signal), signal);
         
-        line(theseAxes, (t+indx)*5, expFit, 'Color', 'red');
+        line(theseAxes, ...
+            (t+indx-1)*5, expFit, ...
+            'Color', 'red', ...
+            'tag', 'exp fit');
         
         ylim = get(theseAxes, 'YLim');
         xt = 20;
@@ -94,22 +102,27 @@ function expo(filename)
             'fontsize',12,'FontWeight','bold');
         
         % Add the begin and end drag lines
-        tstart = (t(1)+indx)*5;
-        tend   = (t(end)+indx)*5;
-        line(theseAxes, ...
+        tstart = (t(1)+indx-1)*5;
+        tend   = (t(end)+indx-1)*5;
+        l = line(theseAxes, ...
             [tstart tstart], ylim, ...
             'color', 'black', ...
-            'LineWidth', 2 ...
-            );
-        line(theseAxes, ...
+            'LineWidth', 2, ...
+            'tag', 'drag line');
+        ud1.hoverFunction = {@expLineHoverHandler, 2, l, signal};
+        set(l, 'UserData', ud1);
+        
+        l = line(theseAxes, ...
             [tend tend], ylim, ...
             'color', 'black', ...
-            'LineWidth', 2 ...
-            );
+            'LineWidth', 2, ...
+            'tag', 'drag line');
+        ud2.hoverFunction = {@expLineHoverHandler, 2, l, signal};
+        set(l, 'UserData', ud2);
     end
     
-    function setRiseLine(theseAxes, signal, sigName)
-        [maxSignal, indx] = max(signal);
+    function setRiseLine(theseAxes, signal)
+        [~, indx] = max(signal);
         
         % Linear regression on initial slope
         tl = (24:indx)';
@@ -127,12 +140,12 @@ function expo(filename)
 %         end
         
         % Linear fit
-        tm = [24 indx]*5;
+        tm = [24 indx]*5 - 1*5; % Subtract time zero offset
         signalLine = a(1) + a(2)*[24 indx];
-        drawRiseLine(theseAxes, signalLine, tm, sigName)
+        drawRiseLine(theseAxes, signalLine, tm)
     end
     
-    function drawRiseLine(theseAxes, signalLine, tm, sigName)
+    function drawRiseLine(theseAxes, signalLine, tm)
         RoR = (signalLine(2)-signalLine(1))/(tm(2)-tm(1));
         
         line(theseAxes, ...
@@ -142,27 +155,27 @@ function expo(filename)
         
         x = tm(1);
         y = signalLine(1);
-        ud1.hoverFunction = {@riseLineHoverHandler, signalLine, 'start'};
-        line(theseAxes, ...
+        l = line(theseAxes, ...
             x, y, ...
             'Color', 'red', ...
             'MarkerFaceColor', 'red', ...
             'Marker', 'square', ...
             'MarkerSize', 8, ...
-            'UserData', ud1, ...
             'tag', 'rise line start');
+        ud1.hoverFunction = {@riseLineHoverHandler, 0, l};
+        set(l, 'UserData', ud1)
         
         x = tm(end);
         y = signalLine(end);
-        ud2.hoverFunction = {@riseLineHoverHandler, signalLine, 'end'};
-        line(theseAxes, ...
+        l = line(theseAxes, ...
             x, y, ...
             'Color', 'red', ...
             'MarkerFaceColor', 'red', ...
             'Marker', 'square', ...
             'MarkerSize', 8, ...
-            'UserData', ud2, ...
             'tag', 'rise line end');
+        ud2.hoverFunction = {@riseLineHoverHandler, 0, l};
+        set(l, 'UserData', ud2)
         
         
         % Display rate of rise
@@ -170,49 +183,55 @@ function expo(filename)
         xt = 20;
         dy = ylim(2)/12;
         yt = ylim(2)*0.6 + dy;
-        text(theseAxes, xt, yt, ...
+        text(theseAxes, ...
+            xt, yt, ...
             sprintf('Rate of rise = %g', RoR), ...
-            'fontsize',12,'FontWeight','bold');
+            'fontsize', 12, ...
+            'FontWeight','bold', ...
+            'tag', 'rate of rise');
         
     end
     
-    function riseLineClickHandler(o, evt, signal, detail)
+    function riseLineClickHandler(~, ~, l)
         set(gcf, ...
-            'WindowButtonMotionFcn', {@riseLineDragHandler, signal, detail}, ...
+            'WindowButtonMotionFcn', {@riseLineDragHandler, l}, ...
             'WindowButtonUpFcn', @setDefaultHandlers ...
             );
     end
     
-    function riseLineDragHandler(o, evt, signal, detail)
+    function riseLineDragHandler(~, ~, lhandle)
         cp = get(gca, 'CurrentPoint');
         x = cp(1, 1);
         y = cp(1, 2);
         
+        ldata = findobj(gca, 'tag', 'rise line data');
+        xdata = get(ldata, 'XData');
+        ydata = get(ldata, 'YData');
+        
+        detail = get(lhandle, 'tag');
         switch detail
-            case 'end'
-                line = findobj(gca, 'tag', 'rise line start');
-                xdata = get(line, 'XData');
-                ydata = get(line, 'YData');
+            case 'rise line start'
                 xstart = x;
                 ystart = y;
                 xend = xdata(end);
                 yend = ydata(end);
-            case 'start'
-                line = findobj(gca, 'tag', 'rise line end');
-                xdata = get(line, 'XData');
-                ydata = get(line, 'YData');
+            case 'rise line end'
                 xstart = xdata(1);
                 ystart = ydata(1);
                 xend = x;
                 yend = y;
         end
                 
-       lines = findobj(gca, 'tag', 'rise line data', '-or', 'tag', 'rise line start', '-or', 'tag', 'rise line end');
-       for i = 1:length(lines)
-           set(lines(i), ...
-               'Xdata', [xstart, xend], ...
-               'Ydata', [ystart, yend]);
-       end
+       set(lhandle, ...
+           'XData', x, ...
+           'YData', y);
+       set(ldata, ...
+           'XData', [xstart, xend], ...
+           'YData', [ystart, yend]);
+       
+       RoR = (yend-ystart)/(xend-xstart);
+       th = findobj(gca, 'tag', 'rate of rise');
+       set(th, 'String', sprintf('Rate of rise = %g', RoR));
         
     end
     
@@ -228,10 +247,9 @@ function expo(filename)
     
     function accepted = riseLineHoverHandler(args)            
         delta = 1.5;
-        pnt = get the point here!!
-%         signal= args{2};
-        detail = args{2};
-        ptr = args{3};
+        l = args{1};
+        ptr = args{2};
+        pnt = [get(l, 'XData'), get(l, 'YData')];
         
         x = ptr(1);
         y = ptr(2);
@@ -242,7 +260,7 @@ function expo(filename)
         
         if xlo<=x && x<=xhi && ylo<=y && y<=yhi
             set(gcf, 'Pointer', 'hand')
-            set(gcf, 'WindowButtonDownFcn', {@riseLineClickHandler, detail});
+            set(gcf, 'WindowButtonDownFcn', {@riseLineClickHandler, l});
             accepted = true;
         else
             setDefaultHandlers();
@@ -251,7 +269,62 @@ function expo(filename)
         
     end
     
-    function mousemover(o, evt, hoverTargets)
+    function accepted = expLineHoverHandler(args)            
+        delta  = 1.5;
+        l      = args{1};
+        signal = args{2};
+        ptr    = args{3};
+        pnt    = [get(l, 'XData'), get(l, 'YData')];
+        
+        x   = ptr(1);
+        xlo = pnt(1) - delta;
+        xhi = pnt(1) + delta;
+        
+        if xlo<=x && x<=xhi
+            setptr(gcf, 'lrdrag')
+            set(gcf, 'WindowButtonDownFcn', {@expLineClickHandler, l, signal});
+            accepted = true;
+        else
+            setDefaultHandlers();
+            accepted = false;
+        end            
+        
+    end
+    
+    function expLineClickHandler(~, ~, l, signal)
+        set(gcf, ...
+            'WindowButtonMotionFcn', {@expLineDragHandler, l, signal}, ...
+            'WindowButtonUpFcn', @setDefaultHandlers ...
+            );        
+    end
+    
+    function expLineDragHandler(~, ~, dragLine, signal)
+        cp = get(gca, 'CurrentPoint');
+        x = cp(1, 1);        
+        set(dragLine, 'XData', [x, x]);
+        
+        dragLines = findobj(gca, 'tag', 'drag line');
+        x = get(dragLines(1), 'XData');
+        xlo = x(1)
+        x = get(dragLines(2), 'XData');
+        xhi = x(1)
+        
+        if xlo>xhi
+            x = xlo;
+            xlo = xhi;
+            xhi = x;
+        end
+        
+        istart = round(xlo/5);
+        iend   = round(xhi/5);
+        [t, expFit, thalf] = makeExpFit(istart, iend, signal);
+        expLine = findobj(gca, 'tag', 'exp line');
+        set(expLine, ...
+            'XData', t, ...
+            'YData', expFit);
+    end
+    
+    function mousemover(o, ~)
         
         % Determine which (if any) axes the mouse is over
         axs = findobj(o, 'type', 'axes')';
@@ -274,20 +347,35 @@ function expo(filename)
             return
         end
 
+        
         gs = findall(ax);
-        for i=1:length(gs)
+        n = length(gs);
+        priorities = zeros(1, n);
+        handlers = cell(1, n);
+        args = cell(1, n);
+        indx = 1;
+        for i=1:n
             g = gs(i);
             ud = get(g, 'UserData');
             if ~isempty(ud)
                 if isfield(ud, 'hoverFunction')
-                    f = ud.hoverFunction{1};
-                    args = {ud.hoverFunction{2:end}};
-                    args{end+1} = p;
-                    if f(args)
-                        return
-                    end
+                    handlers{indx} = ud.hoverFunction{1};
+                    priorities(indx) = ud.hoverFunction{2};
+                    args{indx} = {ud.hoverFunction{3:end}, p};
+                    indx = indx + 1;
                 end
             end
+        end
+
+        indx = indx - 1;
+        [~, order] = sort(priorities(1:indx));
+        for i=1:indx
+            ii = order(i);
+            f = handlers{ii};
+            arg = args{ii};
+            if f(arg)
+                return
+            end            
         end
         
         setptr(gcf, 'arrow');
