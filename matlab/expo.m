@@ -1,4 +1,5 @@
-% For Henrik: start with e..g. expo('AFALK_duo.dat')
+% For Henrik: start with e.g. expo('AFALK_duo.dat')
+%             or expo and it will ask for a file
 
 function expo(filename)
     % EXPO(FILENAME) fit and exponential to decimated PD and pressure data
