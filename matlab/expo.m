@@ -1,19 +1,27 @@
 % For Henrik: start with e..g. expo('AFALK_duo.dat')
 
 function expo(filename)
-    % EXPO(FILENAME) fit and exponential to decimated PD data
+    % EXPO(FILENAME) fit and exponential to decimated PD and pressure data
     
     
     if ~exist('filename', 'var')
-        %         [filename, path] = uigetfile('*.dat', 'Select a PD/pressure file')
-        filename = 'acast1_jej.dat';
-        path = '/Users/thomas.e/neurosim/ibs-tools/test-data/';
+        [filename, path] = uigetfile('*.dat', 'Select a PD/pressure file')
 %         path = 'C:\Users\evan\Documents\neurosim\ibs-tools\test-data\';
+%         filename = 'acast1_jej.dat';
+%         path = '/Users/thomas.e/neurosim/ibs-tools/test-data/';
+        [~, filename, ext] = fileparts(filename);
+    else
+        [path, filename, ext] = fileparts(filename);
     end
     
     [pdAxes, pressAxes] = setup;
     
-    junk = load(strcat(path, filename));
+    ud.path = path;
+    ud.filename = filename;
+    ud.ext = ext;
+    set(gcf, 'UserData', ud);
+    
+    junk = load(strcat(path, filename, ext));
     
     PD = -junk(:,3);
     startAnalysis(PD, pdAxes, 'PD');
@@ -53,25 +61,28 @@ function expo(filename)
         text(theseAxes, xt, yt, ...
             sprintf('time to %s peak = %g', sigName, t2pSignal), ...
             'fontsize',12,'FontWeight','bold');
+        saveDatum(theseAxes, t2pSignal, 'timeToPeak');
         
         % Display max PD
         yt = yt + dy;
         text(theseAxes, xt, yt, ...
             sprintf('Max %s = %g', sigName, maxSignal), ...
-            'fontsize',12,'FontWeight','bold');
+            'fontsize',12,'FontWeight','bold');        
+        saveDatum(theseAxes, maxSignal, 'max');
         
         % Display mean pressure
         yt = yt + dy;
         text(theseAxes, xt, yt, ...
             sprintf('mean %s = %g', sigName, meanSignal), ...
             'fontsize',12,'FontWeight','bold');
+        saveDatum(theseAxes, meanSignal, 'mean');
     end
     
     function [t, expFit, thalf] = makeExpFit(istart, iend, signal)
-        maxSignal = max(signal);
+        maxSignal = max(signal(istart:iend));
         % Initial estimate for lambda
         y = signal(istart:iend)/maxSignal + 1e-3;
-        t = 1:length(y)-1;
+        t = (1:length(y))-1;
         logstart = exp(polyfit(t',log(y),1));
         lam = logstart(2);
         % Refine fit
@@ -80,7 +91,6 @@ function expo(filename)
         thalf = log(2)/lambda*5;
         
         % exponential fit
-%         t = [0 t]; % Set time to start at t=0
         expFit = exp(-lambda*t)*maxSignal;
     end
     
@@ -91,7 +101,8 @@ function expo(filename)
         line(theseAxes, ...
             (t+indx-1)*5, expFit, ...
             'Color', 'red', ...
-            'tag', 'exp fit');
+            'LineWidth', 2, ...
+            'tag', 'exp line');
         
         ylim = get(theseAxes, 'YLim');
         xt = 20;
@@ -99,8 +110,11 @@ function expo(filename)
         
         text(theseAxes, xt, yt, ...
             sprintf('t_1_/_2 = %g', thalf), ...
-            'fontsize',12,'FontWeight','bold');
-        
+            'fontsize',12, ...
+            'FontWeight','bold', ...
+            'tag', 'halflife text');                
+        saveDatum(theseAxes, thalf, 'decayHalflife');
+
         % Add the begin and end drag lines
         tstart = (t(1)+indx-1)*5;
         tend   = (t(end)+indx-1)*5;
@@ -130,15 +144,6 @@ function expo(filename)
         X = [ones(size(tl)) tl];
         a = X\signall;
         
-        % Time for signal to return with 10% of basline
-%         x = signal(indx:end);
-%         signalRet = min(find(x<0.1*maxSignal));
-%         if isempty(signalRet)
-%             signalRet = (length(signal)-indx)*5;
-%         else
-%             signalRet = signalRet*5;
-%         end
-        
         % Linear fit
         tm = [24 indx]*5 - 1*5; % Subtract time zero offset
         signalLine = a(1) + a(2)*[24 indx];
@@ -151,6 +156,7 @@ function expo(filename)
         line(theseAxes, ...
             tm, signalLine, ...
             'Color', 'red', ...
+            'LineWidth', 2, ...
             'tag', 'rise line data');
         
         x = tm(1);
@@ -190,6 +196,15 @@ function expo(filename)
             'FontWeight','bold', ...
             'tag', 'rate of rise');
         
+        saveDatum(theseAxes, RoR, 'rateOfRise');
+        
+    end
+    
+    function saveDatum(axes, val, field)
+        ud = get(gcf, 'UserData');
+        type = get(axes, 'Tag');
+        ud.(strcat(field, type)) = val;
+        set(gcf, 'UserData', ud);
     end
     
     function riseLineClickHandler(~, ~, l)
@@ -232,7 +247,7 @@ function expo(filename)
        RoR = (yend-ystart)/(xend-xstart);
        th = findobj(gca, 'tag', 'rate of rise');
        set(th, 'String', sprintf('Rate of rise = %g', RoR));
-        
+       saveDatum(gca, RoR, 'rateOfRise');
     end
     
     function setDefaultHandlers(varargin)
@@ -300,28 +315,40 @@ function expo(filename)
     
     function expLineDragHandler(~, ~, dragLine, signal)
         cp = get(gca, 'CurrentPoint');
-        x = cp(1, 1);        
+        x = cp(1, 1);
+        tmax = (length(signal)-1)*5;
+        if x>tmax
+            x = tmax;
+        end
+        if x<0
+            x = 0;
+        end
+        
         set(dragLine, 'XData', [x, x]);
         
         dragLines = findobj(gca, 'tag', 'drag line');
         x = get(dragLines(1), 'XData');
-        xlo = x(1)
+        xlo = x(1);
         x = get(dragLines(2), 'XData');
-        xhi = x(1)
+        xhi = x(1);
         
         if xlo>xhi
             x = xlo;
             xlo = xhi;
             xhi = x;
         end
-        
-        istart = round(xlo/5);
-        iend   = round(xhi/5);
+                
+        istart = round(xlo/5)+1;
+        iend   = round(xhi/5)+1;
         [t, expFit, thalf] = makeExpFit(istart, iend, signal);
         expLine = findobj(gca, 'tag', 'exp line');
         set(expLine, ...
-            'XData', t, ...
+            'XData', (t+istart-1)*5, ...
             'YData', expFit);
+        
+        th = findobj(gca, 'tag', 'halflife text');
+        set(th, 'String', sprintf('t_1_/_2 = %g', thalf));
+        saveDatum(gca, thalf, 'decayHalflife');
     end
     
     function mousemover(o, ~)
@@ -382,11 +409,34 @@ function expo(filename)
         
     end
     
-    function expoQuit(o, crap, h)
+    function expoQuit(~, ~, ~)
         closereq
     end
     
-    function saveToExcel(o, crap, h)
+    function saveToExcel(~, ~)
+        ud = get(gcf, 'UserData');
+        fh = fopen(strcat(ud.path, ud.filename, '.csv'), 'w');
+        
+        try
+            fprintf(fh, '"mean pressure", "max pressure", "time to peak pressure", "rate of pressure rise", "pressure decay half life", "mean PD", "max PD", "time to peak PD", "rate of PD rise", "PD decay half life"\n');
+            fprintf(fh, '%g, %g, %g, %g, %g, %g, %g, %g, %g, %g\n', ...
+            ud.meanPressure, ...
+            ud.maxPressure, ...
+            ud.timeToPeakPressure, ...
+            ud.rateOfRisePressure, ...
+            ud.decayHalflifePressure, ...
+            ud.meanPD, ...
+            ud.maxPD, ...
+            ud.timeToPeakPD, ...
+            ud.rateOfRisePD, ...
+            ud.decayHalflifePD ...
+            );
+        catch ME
+            disp('Error writing CSV data:')
+            disp(ME)
+        end
+
+        fclose(fh);
     end
     
     function bool = pinrect(pts,rect)
@@ -400,14 +450,14 @@ function expo(filename)
         %   Copyright 1988-2002 The MathWorks, Inc.
         % $Revision: 1.8 $
         
-        [i,j] = find(isnan(pts));
+        [i,~] = find(isnan(pts));
         bool = (pts(:,1)<rect(1))|(pts(:,1)>rect(2))|...
             (pts(:,2)<rect(3))|(pts(:,2)>rect(4));
         bool = ~bool;
         bool(i) = 0;
     end
     
-    function [pdAxes, pressAxes] = setup(hoverTargets)
+    function [pdAxes, pressAxes] = setup
         UI_NAME = 'Pulse Analyzer';
         try
             delete(findobj('Name', UI_NAME))
@@ -415,7 +465,6 @@ function expo(filename)
             % Nothing
         end
         
-        ud.mode = 'move';
         h1 = figure( ...
             'Units', 'characters', ...
             'Color',[0.8 1.0 0.8], ...
@@ -423,7 +472,6 @@ function expo(filename)
             'Name', UI_NAME, ...
             'NumberTitle', 'off', ...
             'Position', [36.6667   15.5000  140   50], ...
-            'UserData', ud, ...
             'toolbar',  'figure');
         
         pdAxes = axes( ...
@@ -432,7 +480,7 @@ function expo(filename)
             'XminorGrid', 'on', ...
             'XGrid', 'on', ...
             'YGrid', 'on', ...
-            'Tag', 'pd axes');
+            'Tag', 'PD');
         
         pressAxes = axes( ...
             'Position', [0.03 0.532786885245902 0.96 0.381147540983607], ...
@@ -440,7 +488,7 @@ function expo(filename)
             'XminorGrid', 'on', ...
             'XGrid', 'on', ...
             'YGrid', 'on', ...
-            'Tag', 'press axes');
+            'Tag', 'Pressure');
         
         uicontrol( ...
             'Style', 'text', ...
@@ -472,7 +520,7 @@ function expo(filename)
             'ForegroundColor', 'black', ...
             'Position', [0.89 0.003 0.1 0.04], ...
             'String', 'save to Excel', ...
-            'callback', {@saveToExcel, h1});
+            'callback', @saveToExcel);
         
     end
     
